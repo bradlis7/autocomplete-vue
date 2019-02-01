@@ -30,53 +30,49 @@
 <template>
     <div :class="classPrefix" @mousedown="mousefocus = true" @mouseout="mousefocus = false">
         <input type="text" @blur="focused = false" @focus="focused = true"
-            v-model="search" :placeholder="placeholder" :class="inputClass"
+            v-model="search" :class="inputClass"
             @keydown.down.prevent.stop="moveDown()"
             @keydown.up.prevent.stop="moveUp()"
-            @keydown.enter.prevent.stop="select(selectedIndex)"
+            @keydown.enter.prevent="select(selectedIndex, $event)"
             @keydown.tab="mousefocus = false"
-            :value="value"
-            ref="input"
-            :required="required">
+            v-bind="$attrs"
+            ref="input">
         <div v-if="showSuggestions" :class="classPrefix + '__suggestions'">
             <div v-for="(entry, index) in filteredEntries"
-                @click="select(index)"
+                @click="select(index, $event)"
                 :class="[classPrefix + '__entry', selectedClass(index)]">
-                {{ entry[property] }}
-            </div>
+                {{ getProperty(entry) }}
+          </div>
         </div>
     </div>
 </template>
-
 <script>
 import { autocompleteBus } from "./autocompleteBus.js";
 
 export default {
+  inheritAttrs: false,
   data() {
     return {
       entries: [],
-      search: "",
+      search: this.value || "",
       focused: false,
       mousefocus: false,
-      selectedIndex: 0
+      selectedIndex: -1
     };
   },
   computed: {
     filteredEntries() {
       if (this.search.length <= this.threshold) {
         return [];
-      } else {
-        return this.entries.filter(entry => {
-          if (this.ignoreCase) {
-            return (
-              entry[this.property]
-                .toLowerCase()
-                .indexOf(this.search.toLowerCase()) > -1
-            );
-          }
-          return entry[this.property].indexOf(this.search) > -1;
-        });
       }
+      var search = this.ignoreCase ? this.search.toLowerCase() : this.search;
+      return this.entries.filter(entry => {
+        var current = this.getProperty(entry);
+        if (this.ignoreCase) {
+          current = current.toLowerCase();
+        }
+        return current.indexOf(search) > -1;
+      });
     },
     hasSuggestions() {
       if (this.search.length <= this.threshold) {
@@ -106,28 +102,39 @@ export default {
     }
   },
   methods: {
-    select(index) {
-      if (this.hasSuggestions) {
-        this.search = this.filteredEntries[index][this.property];
-        autocompleteBus.$emit("autocomplete-select", this.search);
-        this.$emit("selected", this.search);
+    getProperty(entry) {
+      if (typeof (this.property) == "function") {
+        return this.property(entry);
+      } else if (typeof (this.property) == "string") {
+        return entry[this.property];
+      } else {
+        throw "Unsupported type";
+      }
+    },
+    select(index, event) {
+      if (!this.hasSuggestions) return;
+      if (index === -1) return;
 
-        if (this.autoHide) {
-          this.mousefocus = false;
-          this.focused = false;
-          this.$refs.input.blur();
-        } else {
-          this.$nextTick(() => {
-            this.$refs.input.focus();
-          });
-        }
+      event.stopPropagation();
+      this.search = this.getProperty(this.filteredEntries[index]);
+      autocompleteBus.$emit("autocomplete-select", this.search);
+      this.$emit("selected", this.filteredEntries[index]);
+
+      if (this.autoHide) {
+        this.mousefocus = false;
+        this.focused = false;
+        this.$refs.input.blur();
+      } else {
+        this.$nextTick(() => {
+          this.$refs.input.focus();
+        });
       }
     },
     setEntries(list) {
       this.entries = list;
     },
     moveUp() {
-      if (this.selectedIndex - 1 < 0) {
+      if (this.selectedIndex - 1 < -1) {
         this.selectedIndex = this.filteredEntries.length - 1;
       } else {
         this.selectedIndex -= 1;
@@ -135,7 +142,7 @@ export default {
     },
     moveDown() {
       if (this.selectedIndex + 1 > this.filteredEntries.length - 1) {
-        this.selectedIndex = 0;
+        this.selectedIndex = -1;
       } else {
         this.selectedIndex += 1;
       }
@@ -172,23 +179,14 @@ export default {
       type: Array,
       required: false
     },
-    placeholder: {
-      type: String,
-      required: false
-    },
     property: {
-      type: String,
+      type: [String, Function],
       required: false,
       default: "name"
     },
     inputClass: {
       type: String,
       required: false
-    },
-    required: {
-      type: Boolean,
-      required: false,
-      default: false
     },
     ignoreCase: {
       type: Boolean,
@@ -221,6 +219,9 @@ export default {
     },
     value(newValue) {
       this.search = newValue;
+    },
+    list(value) {
+      this.setEntries(value);
     }
   }
 };
